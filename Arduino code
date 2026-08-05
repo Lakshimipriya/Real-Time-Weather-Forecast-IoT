@@ -1,0 +1,94 @@
+#include <SoftwareSerial.h>
+#include <Adafruit_BMP085.h>
+#include <DHT.h>
+
+#define DHTPIN 7         // DHT11 connected to D7
+#define DHTTYPE DHT11
+
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_BMP085 bmp;
+
+// ESP8266 on SoftwareSerial
+SoftwareSerial esp(2, 3); // RX, TX
+
+String ssid = "honor 8x";
+String password = "Deepika2006";
+String apiKey = "2L02115D3IQ6RNNG";
+
+void setup() {
+  Serial.begin(9600);
+  esp.begin(115200);  // Try 9600 if ESP fails to respond
+
+  dht.begin();
+  if (!bmp.begin()) {
+    Serial.println("BMP180 not found!");
+    while (1);
+  }
+
+  connectWiFi();
+}
+
+void loop() {
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  float tempBMP = bmp.readTemperature();
+  float pressure = bmp.readPressure() / 100.0; // hPa
+
+  Serial.print("DHT Temp: "); Serial.println(t);
+  Serial.print("DHT Humidity: "); Serial.println(h);
+  Serial.print("BMP180 Temp: "); Serial.println(tempBMP);
+  Serial.print("Pressure: "); Serial.println(pressure);
+
+  String data = "GET /update?api_key=" + apiKey +
+                "&field1=" + String(t) +
+                "&field2=" + String(h) +
+                "&field3=" + String(tempBMP) +
+                "&field4=" + String(pressure);
+
+  sendData(data);
+
+  delay(20000); // ThingSpeak requires min 15 sec delay
+}
+
+void connectWiFi() {
+  sendCommand("AT", 5, "OK");
+  sendCommand("AT+CWMODE=1", 5, "OK");
+  sendCommand("AT+CWJAP=\"" + ssid + "\",\"" + password + "\"", 15, "OK");
+  sendCommand("AT+CIPMUX=0", 5, "OK");
+}
+
+void sendData(String data) {
+  sendCommand("AT+CIPSTART=\"TCP\",\"api.thingspeak.com\",80", 10, "OK");
+
+  String httpRequest = data + "\r\n";
+  String sendCmd = "AT+CIPSEND=" + String(httpRequest.length());
+  sendCommand(sendCmd, 5, ">");
+
+  esp.print(httpRequest);
+
+  delay(2000);
+
+  sendCommand("AT+CIPCLOSE", 5, "OK");
+}
+
+void sendCommand(String cmd, int timeout, String expected) {
+  esp.println(cmd);
+  
+  long int time = millis();
+  String response = "";
+
+  while ((millis() - time) < (timeout * 1000)) {
+    while (esp.available()) {
+      char c = esp.read();
+      response += c;
+    }
+    if (response.indexOf(expected) != -1) {
+      Serial.println("OK: " + cmd);
+      return;
+    }
+  }
+
+  Serial.println("Fail: " + cmd);
+  Serial.println("Response: " + response);
+}
+
